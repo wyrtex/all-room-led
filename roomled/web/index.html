@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>RoomLED</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#14161c;--card:#1d2029;--line:#2c303c;--fg:#e8eaf0;--mut:#8a91a3;--acc:#5b8cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0;flex:1}main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 20px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+button,select,input[type=text]{background:#262a36;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--acc)}button.p{background:var(--acc);border-color:var(--acc);color:#fff}
+.scene{margin:0 6px 6px 0}.scene.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+.dev{margin-bottom:10px}.dev b{display:block;margin-bottom:4px}.dev small{color:var(--mut);font-weight:400}
+.zone{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px}.zone:hover{background:#232733}
+.zone .n{flex:1}.zone .m{color:var(--mut);font-size:12px}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.row label{color:var(--mut);width:80px}
+input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--line);background:none;border-radius:6px}
+input[type=range]{flex:1}.err{background:#4a1f26;border:1px solid #8b3a46;padding:10px;border-radius:8px;margin:12px 20px}
+.tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-radius:10px;margin:0 4px 4px 0;font-size:12px;cursor:pointer}
+</style></head><body>
+<header><h1>RoomLED</h1>
+<label>Яркость <input id="br" type="range" min="0" max="1" step="0.05" style="width:140px"></label>
+<button id="rescan">Найти устройства</button><button id="off">Выключить всё</button></header>
+<div id="err" class="err" style="display:none"></div>
+<main><div>
+ <div class="card"><h2>Сцены</h2><div id="scenes"></div>
+  <div class="row" style="margin-top:8px"><input id="sname" type="text" placeholder="Имя новой сцены">
+  <input id="swp" type="text" placeholder="project.json обоев (необязательно)" style="flex:1">
+  <button id="ssave">Сохранить текущее как сцену</button></div></div>
+ <div class="card"><h2>Устройства <small style="text-transform:none">(отметь зоны, затем справа выбери режим)</small></h2>
+  <div class="row"><button id="selall">Выбрать все</button><button id="selnone">Снять выбор</button></div>
+  <div id="devs"></div></div>
+</div><div>
+ <div class="card"><h2>Режим для выбранного</h2>
+  <div class="row"><label>Режим</label><select id="eff" style="flex:1"></select></div>
+  <div class="row"><label>Цвета</label><span id="cols"></span><button id="addc">+</button><button id="remc">−</button></div>
+  <div class="row"><label>Скорость</label><input id="spd" type="range" min="0.1" max="4" step="0.1" value="1"></div>
+  <button class="p" id="apply" style="width:100%">Применить</button></div>
+ <div class="card"><h2>Группы</h2><div id="groups"></div>
+  <div class="row" style="margin-top:6px"><input id="gname" type="text" placeholder="Имя группы" style="flex:1">
+  <button id="gsave">Из выбранных</button></div></div>
+</div></main>
+<script>
+const $=id=>document.getElementById(id);let S=null,sel=new Set(),cols=['#ff0000','#00ff00'];
+const api=(p,b)=>fetch(p,{method:'POST',body:JSON.stringify(b||{})}).then(r=>r.json());
+const colorInputs=()=>{$('cols').innerHTML='';cols.forEach((c,i)=>{const e=document.createElement('input');e.type='color';e.value=c;
+ e.oninput=()=>cols[i]=e.value;$('cols').appendChild(e)})};
+$('addc').onclick=()=>{if(cols.length<6){cols.push('#ffffff');colorInputs()}};
+$('remc').onclick=()=>{if(cols.length>1){cols.pop();colorInputs()}};
+async function load(){S=await (await fetch('/api/state')).json();render()}
+function render(){
+ $('err').style.display=S.error?'block':'none';$('err').textContent=S.error;$('br').value=S.brightness;
+ if(!$('eff').options.length)for(const[k,v]of Object.entries(S.effects))$('eff').add(new Option(v,k));
+ $('scenes').innerHTML='';S.scenes.forEach(n=>{const b=document.createElement('button');b.className='scene'+(n==S.active_scene?' on':'');
+  b.textContent=n;b.onclick=async()=>{await api('/api/scene',{name:n});load()};
+  b.oncontextmenu=async e=>{e.preventDefault();if(confirm('Удалить сцену «'+n+'»?')){await api('/api/scene/delete',{name:n});load()}};
+  $('scenes').appendChild(b)});
+ $('devs').innerHTML='';S.devices.forEach(d=>{const w=document.createElement('div');w.className='dev';
+  w.innerHTML=`<b>${d.name} <small>${d.kind}</small></b>`;
+  d.zones.forEach(z=>{const r=document.createElement('div');r.className='zone';
+   const cb=document.createElement('input');cb.type='checkbox';cb.checked=sel.has(z.key);cb.onchange=()=>{cb.checked?sel.add(z.key):sel.delete(z.key)};
+   const info=z.effect?(S.effects[z.effect.effect]||''):'';
+   r.innerHTML=`<span class="n">${z.name} <span class="m">${z.count} LED ${info?'· '+info:''}</span></span>`;
+   r.prepend(cb);
+   const o=document.createElement('select');o.title='Порядок цветовых каналов. Если красный горит зелёным — выбери GRB';
+   ['RGB','GRB','BRG','RBG','GBR','BGR'].forEach(x=>o.add(new Option(x,x)));o.value=z.order;
+   o.onchange=()=>api('/api/order',{zone:z.key,order:o.value});
+   const id=document.createElement('button');id.textContent='Показать';id.onclick=()=>api('/api/identify',{zone:z.key});
+   r.append(o,id);w.appendChild(r)});$('devs').appendChild(w)});
+ $('groups').innerHTML='';for(const[n,z]of Object.entries(S.groups)){const t=document.createElement('span');t.className='tag';t.textContent=n;
+  t.onclick=()=>{sel=new Set(z);render()};t.oncontextmenu=async e=>{e.preventDefault();await api('/api/group/delete',{name:n});load()};$('groups').appendChild(t)}
+ ['@all|Все','@motherboard|Материнка','@keyboards|Клавиатуры'].forEach(s=>{const[v,n]=s.split('|');const t=document.createElement('span');t.className='tag';t.textContent=n;
+  t.onclick=()=>{sel=new Set();S.devices.forEach(d=>{if(v=='@all'||(v=='@motherboard'&&d.kind=='motherboard')||(v=='@keyboards'&&d.kind=='keyboard'))d.zones.forEach(z=>sel.add(z.key))});render()};$('groups').prepend(t)});
+}
+$('apply').onclick=async()=>{if(!sel.size)return alert('Отметь хотя бы одну зону');
+ await api('/api/apply',{targets:[...sel],effect:$('eff').value,palette:cols,speed:+$('spd').value});load()};
+$('selall').onclick=()=>{S.devices.forEach(d=>d.zones.forEach(z=>sel.add(z.key)));render()};
+$('selnone').onclick=()=>{sel.clear();render()};
+$('rescan').onclick=async()=>{await api('/api/rescan');load()};$('off').onclick=async()=>{await api('/api/off');load()};
+$('br').oninput=e=>api('/api/brightness',{value:e.target.value});
+$('gsave').onclick=async()=>{if(!$('gname').value||!sel.size)return;await api('/api/group',{name:$('gname').value,zones:[...sel]});load()};
+$('ssave').onclick=async()=>{if(!$('sname').value)return;await api('/api/scene/save',{name:$('sname').value,wallpaper:$('swp').value});load()};
+colorInputs();load();setInterval(()=>{if(!document.hidden)fetch('/api/state').then(r=>r.json()).then(s=>{S.error=s.error;S.active_scene=s.active_scene})},5000);
+</script></body></html>
